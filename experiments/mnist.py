@@ -1,11 +1,14 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision as tv
-from src.ctrl import TriangleMLP, StructuredDropout
 from tqdm import trange
 
-epochs = 100
+from src.ctrl import TriangleMLP, StructuredDropout, TriangleLinear
+
+epochs = 80
 min_budget = 1
 max_budget = 128
 
@@ -40,16 +43,20 @@ def main():
     skip=1000,
     flip=True,
   ).to(device)
-  #model = nn.Sequential(
-  #  nn.Linear(28 * 28, max_budget),
-  #  nn.LeakyReLU(),
-  #  nn.Linear(max_budget, max_budget),
-  #  nn.LeakyReLU(),
-  #  nn.Linear(max_budget, max_budget),
-  #  nn.LeakyReLU(),
-  #  nn.Linear(max_budget, 10),
-  #).to(device)
+  rounded_budget = math.floor(math.sqrt(2) * max_budget)
+  model = nn.Sequential(
+    nn.Linear(28 * 28, rounded_budget),
+    #TriangleLinear(28 * 28, max_budget, backflow=10,flip=True),
+    nn.LeakyReLU(),
+    #nn.Linear(rounded_budget, rounded_budget),
+    TriangleLinear(rounded_budget, rounded_budget, backflow=10,flip=True),
+    nn.LeakyReLU(),
+    #nn.Dropout(),
+    #StructuredDropout(zero_pad=True),
+    nn.Linear(rounded_budget, 10),
+  ).to(device)
   opt = torch.optim.Adam(model.parameters(), lr=8e-4, weight_decay=0)
+  sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, 50_000)
   t = trange(epochs)
   for i in t:
     for img, label in loader:
@@ -60,10 +67,14 @@ def main():
       loss = F.cross_entropy(pred, label)
       loss.backward()
       opt.step()
+      sched.step()
 
       pred_labels = F.softmax(pred,dim=-1).argmax(dim=-1)
       correct = (pred_labels == label).sum()
-      t.set_postfix(L=f"{loss.item():.03f}", correct=f"{correct:03}/{label.shape[0]:03}")
+      t.set_postfix(
+        L=f"{loss.item():.03f}", correct=f"{correct:03}/{label.shape[0]:03}",
+        lr=f"{sched.get_last_lr()[0]:.01e}"
+      )
   if isinstance(model, TriangleMLP):
     with torch.no_grad():
       accuracies = [eval(model, i) for i in range(1, max_budget+1)]

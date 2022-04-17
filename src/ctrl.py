@@ -63,6 +63,7 @@ class StructuredDropout(nn.Module):
     # the minimum number of features to always retain
     lower_bound:int=1,
     eval_size=None,
+    zero_pad:bool = False,
   ):
     super().__init__()
     assert(p >= 0)
@@ -70,6 +71,7 @@ class StructuredDropout(nn.Module):
     self.p = p
     self.lower_bound = lower_bound
     self.eval_size = eval_size
+    self.zero_pad = zero_pad
   def forward(self, x):
     p = self.p
     target_feat = x.shape[-1]
@@ -79,7 +81,7 @@ class StructuredDropout(nn.Module):
 
     elif random.random() > p: return x
     i = random.randint(self.lower_bound, x.shape[-1])
-    return x[..., :i]
+    return x[..., :i] if not self.zero_pad else F.pad(x[..., :i], (0, x.shape[-1]-i))
   def set_latent_budget(self, ls:int): self.eval_size = ls
   def cutoff(self, upper):
     if random.random() > self.p: return None
