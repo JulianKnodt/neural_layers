@@ -40,19 +40,28 @@ class TriangleLinear(nn.Module):
     self.weight = nn.Parameter(torch.rand(self.mask.sum()))
     if bias: self.bias = nn.Parameter(torch.rand(out_features))
     else: self.register_parameter("bias", None)
-  def forward(self, x):
-    sz = x.shape[-1]
+  def get_matrix(self, sz=None):
+    if sz is None:
+      return torch.zeros_like(self.mask, dtype=torch.float).masked_scatter(mask, self.weight)
     assert(sz <= self.in_features),\
       f"Must pass less parameters to triangle layer {layer.shape} {sz}"
-
     mask = self.mask[:sz - self.diagonal, :sz]
-    layer = torch.zeros_like(mask, dtype=torch.float)\
+    return torch.zeros_like(mask, dtype=torch.float)\
       .masked_scatter(mask, self.weight[:mask.sum()])
+
+  def forward(self, x):
+    layer = self.get_matrix(x.shape[-1])
 
     out = torch.sum(layer * x[..., None, :], dim=-1)
     if self.bias is not None: out = out + self.bias[:out.shape[-1]]
-    # TODO does flipping do anything here?
     return out.flip([-1]) if self.flip else out
+  # Messing around with using solving instead of using matrix multiply
+  def solve_forward(self, b):
+    A = self.get_matrix(b.shape[-1])
+    assert(A.shape[0] == A.shape[1])
+    X = torch.linalg.triangular_solve(A, b)
+    if self.bias is not None: X = X - self.bias[:out.shape[-1]]
+    return X
 
 # Conditionally zeros out the last components of a vector
 class StructuredDropout(nn.Module):
@@ -77,14 +86,16 @@ class StructuredDropout(nn.Module):
     target_feat = x.shape[-1]
     # TODO need to add some normalization here, dividing at training time
     if not self.training:
-      return x if self.eval_size is None else x[..., :self.eval_size]
+      esz = self.eval_size
+      if esz is None or esz > x.shape[-1]: return x
+      return x[..., :esz] if not self.zero_pad else F.pad(x[..., :esz], (0,x.shape[-1]-esz))
 
-    elif random.random() > p: return x
+    elif random.random() > p or self.lower_bound > x.shape[-1]: return x
     i = random.randint(self.lower_bound, x.shape[-1])
     return x[..., :i] if not self.zero_pad else F.pad(x[..., :i], (0, x.shape[-1]-i))
   def set_latent_budget(self, ls:int): self.eval_size = ls
   def cutoff(self, upper):
-    if random.random() > self.p: return None
+    if random.random() > self.p or self.lower_bound > upper: return None
     return random.randint(self.lower_bound, upper)
   # Apply the linear layer that precedes x more cheaply.
   def pre_apply_linear(self, lin, x, output_features:int):

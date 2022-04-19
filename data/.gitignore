@@ -2,3 +2,5 @@
 t10k*
 train*
 coco/
+celeba/
+cifar-10-batches-py/
