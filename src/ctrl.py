@@ -55,6 +55,7 @@ class TriangleLinear(nn.Module):
     out = torch.sum(layer * x[..., None, :], dim=-1)
     if self.bias is not None: out = out + self.bias[:out.shape[-1]]
     return out.flip([-1]) if self.flip else out
+
   # Messing around with using solving instead of using matrix multiply
   def solve_forward(self, b):
     A = self.get_matrix(b.shape[-1])
@@ -73,30 +74,43 @@ class StructuredDropout(nn.Module):
     lower_bound:int=1,
     eval_size=None,
     zero_pad:bool = False,
+
+    step:int=1,
   ):
-    super().__init__()
     assert(p >= 0)
     assert(p <= 1)
+    assert(step >= 1)
+    assert(lower_bound > 0), "Cannot use 0 or below as lower bound"
+
+    super().__init__()
     self.p = p
+    self.step = step
     self.lower_bound = lower_bound
     self.eval_size = eval_size
+
     self.zero_pad = zero_pad
+
   def forward(self, x):
     p = self.p
-    target_feat = x.shape[-1]
-    # TODO need to add some normalization here, dividing at training time
+    upper = x.shape[-1]
+
     if not self.training:
       esz = self.eval_size
-      if esz is None or esz > x.shape[-1]: return x
-      return x[..., :esz] if not self.zero_pad else F.pad(x[..., :esz], (0,x.shape[-1]-esz))
+      if esz is None or esz > upper: return x
 
-    elif random.random() > p or self.lower_bound > x.shape[-1]: return x
-    i = random.randint(self.lower_bound, x.shape[-1])
-    return x[..., :i] if not self.zero_pad else F.pad(x[..., :i], (0, x.shape[-1]-i))
+      cut = (upper/esz) * x[..., :esz]
+      return cut if not self.zero_pad else F.pad(cut, (0,upper-esz))
+
+    cutoff = self.cutoff(upper)
+    if cutoff is None: return x
+
+    cut = (upper/cutoff) * x[..., :cutoff]
+    return cut if not self.zero_pad else F.pad(cut, (0, upper-cutoff))
+
   def set_latent_budget(self, ls:int): self.eval_size = ls
   def cutoff(self, upper):
     if random.random() > self.p or self.lower_bound > upper: return None
-    return random.randint(self.lower_bound, upper)
+    return random.choice(range(self.lower_bound, upper, self.step))
   # Apply the linear layer that precedes x more cheaply.
   def pre_apply_linear(self, lin, x, output_features:int):
     cutoff = self.cutoff(output_features) if self.training else self.eval_size

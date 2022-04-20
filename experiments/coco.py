@@ -8,9 +8,9 @@ import matplotlib.pyplot as plt
 from src.vit import ViT
 from src.ctrl import StructuredDropout
 
-epochs = 100
+epochs = 40
 min_budget = 1
-max_budget = 128
+max_budget = 256
 
 device = "cuda"
 
@@ -18,7 +18,7 @@ def eval(model):
   model = model.eval()
 
   cifar10 = tv.datasets.CIFAR10(
-    "data", train=True, download=False,
+    "data", train=False, download=True,
     transform=tv.transforms.ToTensor(),
   )
   loader = torch.utils.data.DataLoader(cifar10, batch_size=333, shuffle=True)
@@ -38,20 +38,25 @@ def eval(model):
 def main():
   cifar10 = tv.datasets.CIFAR10(
     "data", train=True, download=False,
-    transform=tv.transforms.ToTensor(),
+    transform=tv.transforms.Compose([
+      tv.transforms.ToTensor(),
+      tv.transforms.ColorJitter(),
+    ]),
   )
   loader = torch.utils.data.DataLoader(cifar10, batch_size=333, shuffle=True)
-  dropout = StructuredDropout(0.2, zero_pad=True, lower_bound=16)
+  dropout = StructuredDropout(0.8, zero_pad=True, lower_bound=16, step=8)
+  #dropout = nn.Dropout(0.5)
   model = ViT(
     image_size=32,
-    patch_size=8,
+    patch_size=4,
     num_classes=10,
-    dim=128,
-    depth=5,
-    heads=4,
-    mlp_dim=128,
+    dim=max_budget,
+    depth=4,
+    heads=5,
+    mlp_dim=max_budget,
     dropout = dropout,
     emb_dropout = dropout,
+    pool = "mean",
   ).to(device)
 
   opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
@@ -61,6 +66,7 @@ def main():
     for imgs, labels in loader:
       imgs = imgs.to(device)
       labels = labels.to(device)
+
       opt.zero_grad()
       pred = model(imgs)
 
@@ -75,7 +81,7 @@ def main():
       loss.backward()
       opt.step()
   accs = []
-  budgets = range(0, 129)
+  budgets = range(1, max_budget+1)
   with torch.no_grad():
     for i in budgets:
       dropout.set_latent_budget(i)
