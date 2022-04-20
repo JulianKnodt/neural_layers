@@ -1,4 +1,5 @@
 from .mnist import main as mnist
-from .coco import main as coco
+from .vit import main as vit
+from .pointnet import main as pointnet
 
 __all__ = [k for k in globals().keys() if not k.startswith("_")]

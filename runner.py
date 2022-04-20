@@ -3,7 +3,8 @@ import argparse
 
 experiments = {
   "mnist": experiments.mnist,
-  "coco": experiments.coco,
+  "vit": experiments.vit,
+  "pointnet": experiments.pointnet,
 }
 
 def arguments():

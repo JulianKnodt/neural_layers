@@ -4,3 +4,4 @@ train*
 coco/
 celeba/
 cifar-10-batches-py/
+ModelNet10/

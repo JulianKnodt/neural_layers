@@ -8,14 +8,14 @@ from tqdm import trange
 
 from src.ctrl import TriangleMLP, StructuredDropout, TriangleLinear
 
-epochs = 80
+epochs = 100
 min_budget = 1
 max_budget = 128
 
 device = "cuda"
 
-def eval(model, latent:int):
-  if latent is not None: model.set_latent_budget(latent)
+def eval(model, latent:int, budgeter):
+  if latent is not None: budgeter.set_latent_budget(latent)
   model = model.eval()
   mnist = tv.datasets.MNIST("data", train=False, download=True, transform=tv.transforms.ToTensor())
   loader = torch.utils.data.DataLoader(mnist, batch_size=500, shuffle=False)
@@ -43,17 +43,18 @@ def main():
     skip=1000,
     flip=True,
   ).to(device)
-  rounded_budget = math.floor(math.sqrt(2) * max_budget)
+  sd = StructuredDropout(0.8, zero_pad=True)
   model = nn.Sequential(
-    nn.Linear(28 * 28, rounded_budget),
+    nn.Linear(28 * 28, max_budget),
     #TriangleLinear(28 * 28, max_budget, backflow=10,flip=True),
     nn.LeakyReLU(),
-    #nn.Linear(rounded_budget, rounded_budget),
-    TriangleLinear(rounded_budget, rounded_budget, backflow=10,flip=True),
+    sd,
+    #nn.Linear(max_budget, max_budget),
+    nn.Linear(max_budget, max_budget),
     nn.LeakyReLU(),
     #nn.Dropout(),
-    #StructuredDropout(zero_pad=True),
-    nn.Linear(rounded_budget, 10),
+    sd,
+    nn.Linear(max_budget, 10),
   ).to(device)
   opt = torch.optim.Adam(model.parameters(), lr=8e-4, weight_decay=0)
   sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, 50_000)
@@ -75,11 +76,8 @@ def main():
         L=f"{loss.item():.03f}", correct=f"{correct:03}/{label.shape[0]:03}",
         lr=f"{sched.get_last_lr()[0]:.01e}"
       )
-  if isinstance(model, TriangleMLP):
-    with torch.no_grad():
-      accuracies = [eval(model, i) for i in range(1, max_budget+1)]
-      print(accuracies)
-  else:
-    print(eval(model, None))
+  with torch.no_grad():
+    accuracies = [eval(model, i, sd) for i in range(1, max_budget+1)]
+    print(accuracies)
 
 if __name__ == "__main__": main()
