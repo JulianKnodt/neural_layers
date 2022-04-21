@@ -20,7 +20,7 @@ class TriangleLinear(nn.Module):
     in_features:int,
     out_features:int,
     bias:bool=True,
-    flip:bool=False,
+    flip:bool=True,
     backflow:int=0,
   ):
     super().__init__()
