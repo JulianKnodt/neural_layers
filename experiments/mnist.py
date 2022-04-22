@@ -4,13 +4,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision as tv
-from tqdm import trange
+from tqdm import trange, tqdm
 
 from src.ctrl import TriangleMLP, StructuredDropout, TriangleLinear
+from .utils import plot_budgets
 
-epochs = 100
+epochs = 50
 min_budget = 1
-max_budget = 128
+max_budget = 256
 
 device = "cuda"
 
@@ -76,8 +77,10 @@ def main():
         L=f"{loss.item():.03f}", correct=f"{correct:03}/{label.shape[0]:03}",
         lr=f"{sched.get_last_lr()[0]:.01e}"
       )
+  budgets = range(1, max_budget+1)
   with torch.no_grad():
-    accuracies = [eval(model, i, sd) for i in range(1, max_budget+1)]
-    print(accuracies)
+    accs = [eval(model, i, sd) for i in tqdm(budgets)]
+    print(accs)
+  plot_budgets(budgets, accs)
 
 if __name__ == "__main__": main()

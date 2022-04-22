@@ -10,7 +10,7 @@ from src.ctrl import TriangleMLP, StructuredDropout, TriangleLinear
 from src.pointnet import ModelNet10, PointNet
 from .utils import plot_budgets
 
-epochs = 50
+epochs = 60
 min_budget = 1
 max_budget = 512
 step = 4
@@ -37,7 +37,8 @@ def eval(model, latent:int, budgeter):
 def main():
   modelnet10 = ModelNet10("data/ModelNet10", train=True)
   loader = torch.utils.data.DataLoader(modelnet10, batch_size=32, shuffle=True)
-  sd = StructuredDropout(0.6, zero_pad=True,step=step)
+  p = 0.6
+  sd = StructuredDropout(p, step=step, zero_pad=True)
   model = PointNet(dropout=sd).to(device)
   opt = torch.optim.Adam(model.parameters(), lr=1e-3)
   alpha = 1e-3

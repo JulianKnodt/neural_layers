@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
+from src.ctrl import TriangleMLP
 
 leaky_relu = nn.LeakyReLU(inplace=True)
 
@@ -28,7 +29,7 @@ class Tnet(nn.Module):
     )
 
     self.fc = nn.Sequential(
-      linear(1024,512),
+      nn.Linear(1024,512),
       nn.BatchNorm1d(512),
       leaky_relu,
       dropout,
@@ -42,22 +43,24 @@ class Tnet(nn.Module):
 
 
  def forward(self, input):
-  x = self.fc(self.convs(input).max(dim=-1)[0])
+  x = self.convs(input).max(dim=-1)[0]
+  x = self.fc(x)
   init = torch.eye(self.k, requires_grad=True, device=x.device)
+  x = F.pad(x, (0, 256-x.shape[-1]))
   return self.out(x).reshape(-1,self.k,self.k) + init
 
 
 class Transform(nn.Module):
-  def __init__(self, dropout=nn.Identity()):
+  def __init__(self, dropout=nn.Identity(),linear=nn.Linear):
     super().__init__()
-    self.input_tf = Tnet(k=3, dropout=dropout)
+    self.input_tf = Tnet(k=3, linear=linear, dropout=dropout)
     self.input_to_feats = input_tf = nn.Sequential(
       nn.Conv1d(3,64,1),
       nn.BatchNorm1d(64),
       leaky_relu,
     )
 
-    self.feature_transform = Tnet(k=64)
+    self.feature_transform = Tnet(k=64, linear=linear, dropout=dropout)
     self.feat_conv = nn.Sequential(
       nn.Conv1d(64,128,1),
       nn.BatchNorm1d(128),
@@ -83,10 +86,17 @@ class Transform(nn.Module):
 class PointNet(nn.Module):
   def __init__(self, classes = 10, dropout=nn.Dropout(0.3), linear=nn.Linear):
     super().__init__()
-    self.transform = Transform(dropout=dropout)
+    self.transform = Transform(linear=linear, dropout=dropout)
 
+    #self.compress = TriangleMLP(
+    #  in_features=1024,
+    #  out_features=10,
+    #  hidden_sizes=[512,256],
+    #  skip=1000,
+    #  init_dropout=dropout,
+    #)
     self.compress = nn.Sequential(
-      linear(1024, 512),
+      nn.Linear(1024, 512),
       nn.BatchNorm1d(512),
       leaky_relu,
       dropout,
@@ -95,13 +105,15 @@ class PointNet(nn.Module):
       nn.BatchNorm1d(256),
       leaky_relu,
       dropout,
-
-      nn.Linear(256, classes),
     )
+
+    self.to_classes = nn.Linear(256, classes)
 
   def forward(self, input):
     x, matrix3x3, matrix64x64 = self.transform(input)
-    return self.compress(x), matrix3x3, matrix64x64
+    x = self.compress(x)
+    x = F.pad(x, (0, 256-x.shape[-1]))
+    return self.to_classes(x), matrix3x3, matrix64x64
 
 # reads just the points from an off file
 def read_off(f):

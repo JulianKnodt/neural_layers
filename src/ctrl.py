@@ -21,7 +21,7 @@ class TriangleLinear(nn.Module):
     out_features:int,
     bias:bool=True,
     flip:bool=True,
-    backflow:int=0,
+    backflow:int=4,
   ):
     super().__init__()
     assert(backflow >= 0), "must pass positive backflow"
@@ -96,7 +96,7 @@ class StructuredDropout(nn.Module):
 
     if not self.training:
       esz = self.eval_size
-      if esz is None or esz > upper: return x
+      if esz is None or esz >= upper: return x
 
       cut = (upper/esz) * x[..., :esz]
       return cut if not self.zero_pad else F.pad(cut, (0,upper-esz))
@@ -109,7 +109,7 @@ class StructuredDropout(nn.Module):
 
   def set_latent_budget(self, ls:int): self.eval_size = ls
   def cutoff(self, upper):
-    if random.random() > self.p or self.lower_bound > upper: return None
+    if random.random() > self.p or self.lower_bound >= upper: return None
     return random.choice(range(self.lower_bound, upper, self.step))
   # Apply the linear layer that precedes x more cheaply.
   def pre_apply_linear(self, lin, x, output_features:int):
