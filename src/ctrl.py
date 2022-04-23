@@ -8,6 +8,7 @@ mlp_init_kinds = {
     None,
     "zero",
     "kaiming",
+    "xavier",
     "siren",
 }
 
@@ -222,7 +223,7 @@ class MLP(nn.Module):
     init="xavier",
     dropout = StructuredDropout(p=0.5,lower_bound=3),
   ):
-    assert init in mlp_init_kinds, "Must use init kind"
+    assert init in mlp_init_kinds, f"Must use init kind, got {init} not in {mlp_init_kinds}"
 
     super().__init__()
 
@@ -258,6 +259,14 @@ class MLP(nn.Module):
       for t in biases: nn.init.zeros_(t)
 
   def set_latent_budget(self,ls:int): self.dropout.set_latent_budget(ls)
+  def number_inference_parameters(self):
+    es = self.dropout.eval_size
+    assert(es is not None)
+    out = 0
+    out += self.init.weight[:es, :].numel() + self.init.bias[:es].numel()
+    for l in self.layers: out += l.weight[:es, :es].numel() + l.bias[:es].numel()
+    out += self.init.weight[:, :es].numel() + self.init.bias.numel()
+    return out
   def forward(self, p):
     flat = p.reshape(-1, p.shape[-1])
 
@@ -270,4 +279,4 @@ class MLP(nn.Module):
     out_size = self.out.out_features
 
     return F.linear(x, self.out.weight[:, :x.shape[-1]], self.out.bias)\
-      .reshape(p.shape[:-1] + (out_size,))
+      .reshape(*p.shape[:-1], out_size)

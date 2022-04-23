@@ -1,13 +1,16 @@
 import math
+import time
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision as tv
 from tqdm import trange, tqdm
+import matplotlib.pyplot as plt
 
 from src.ctrl import StructuredDropout, MLP
-from .utils import plot_budgets, plot_timing
+from .utils import plot_budgets, plot_timing, plot_number_parameters
+import gc
 
 epochs = 50
 min_budget = 1
@@ -36,13 +39,14 @@ def main():
   mnist = tv.datasets.MNIST("data", download=True, transform=tv.transforms.ToTensor())
   loader = torch.utils.data.DataLoader(mnist, batch_size=500, shuffle=True)
   # in order to test without structured Dropout, set p to 0.
-  sd = StructuredDropout(0.8, zero_pad=True)
+  sd = StructuredDropout(0.5)
   model = MLP(
-    in_features=28 * 28, out_features=10,
-    hidden_size=[256] * 2,
+    in_features=28 * 28,
+    out_features=10,
+    hidden_sizes=[max_budget] * 2,
     bias=True,
     dropout=sd,
-  )
+  ).to(device)
   opt = torch.optim.Adam(model.parameters(), lr=8e-4, weight_decay=0)
   #sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, 50_000)
   t = trange(epochs)
@@ -67,13 +71,29 @@ def main():
   with torch.no_grad():
     accs = []
     times = []
+    param_counts = []
+    # remove gc so that measuring inference time is more accurate
+    gc.disable()
+
     for b in tqdm(budgets):
+      torch.cuda.empty_cache()
+      gc.collect()
       start = time.time()
-      acc = eval(model, i, sd)
+      accs.append(eval(model, b, sd))
       times.append(time.time() - start)
+      param_counts.append(model.number_inference_parameters())
+
+    gc.enable()
     print(accs)
-    print(times)
   plot_budgets(budgets, accs)
   plot_timing(budgets, times)
+  plot_number_parameters(budgets, param_counts)
+
+  for i, layer in enumerate([model.init, *model.layers, model.out]):
+    plt.imshow(layer.weight.cpu().detach().numpy(), cmap='magma', interpolation='nearest')
+    plt.colorbar()
+    plt.savefig(f"mnist_linear_{i}.png")
+    plt.clf()
+    plt.close()
 
 if __name__ == "__main__": main()
