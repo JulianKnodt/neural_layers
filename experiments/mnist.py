@@ -39,7 +39,8 @@ def main():
   mnist = tv.datasets.MNIST("data", download=True, transform=tv.transforms.ToTensor())
   loader = torch.utils.data.DataLoader(mnist, batch_size=500, shuffle=True)
   # in order to test without structured Dropout, set p to 0.
-  sd = StructuredDropout(0.5)
+  p = 0.75
+  sd = StructuredDropout(p)
   model = MLP(
     in_features=28 * 28,
     out_features=10,
@@ -85,7 +86,7 @@ def main():
 
     gc.enable()
     print(accs)
-  plot_budgets(budgets, accs)
+  plot_budgets(budgets, accs, p)
   plot_timing(budgets, times)
   plot_number_parameters(budgets, param_counts)
 
