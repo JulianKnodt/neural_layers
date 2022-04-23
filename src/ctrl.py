@@ -112,13 +112,21 @@ class StructuredDropout(nn.Module):
     if random.random() > self.p or self.lower_bound >= upper: return None
     return random.choice(range(self.lower_bound, upper, self.step))
   # Apply the linear layer that precedes x more cheaply.
-  def pre_apply_linear(self, lin, x, output_features:int):
+  def pre_apply_linear(self, lin, x, output_features:int, input_features=None):
     cutoff = self.cutoff(output_features) if self.training else self.eval_size
 
-    if cutoff is None: return lin(x)
+
+    weight = lin.weight
+    if input_features is not None:
+      x = x[..., :input_features]
+      weight = weight[:, :input_features]
+
+    if cutoff is None: return F.linear(x, weight, lin.bias), None
+
 
     bias = None if lin.bias is None else lin.bias[:cutoff]
-    return F.linear(x, lin.weight[:cutoff], bias) * output_features/cutoff
+    cut = F.linear(x, weight[:cutoff], bias) * output_features/cutoff
+    return (cut if not self.zero_pad else F.pad(cut, (0, output_features-cutoff))), cutoff
 
 
 class TriangleMLP(nn.Module):
