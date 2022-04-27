@@ -8,19 +8,19 @@ from tqdm import trange, tqdm
 
 from src.ctrl import TriangleMLP, StructuredDropout, TriangleLinear
 from src.pointnet import ModelNet10, PointNet
-from .utils import plot_budgets
+from .utils import plot_budgets, plot_number_parameters
 
-epochs = 60
+epochs = 0
 min_budget = 1
 max_budget = 512
-step = 4
+step = 1
 
 device = "cuda"
 
 def eval(model, latent:int, budgeter):
   if latent is not None: budgeter.set_latent_budget(latent)
   modelnet10 = ModelNet10("data/ModelNet10", train=False)
-  loader = torch.utils.data.DataLoader(modelnet10, batch_size=50, shuffle=False)
+  loader = torch.utils.data.DataLoader(modelnet10, batch_size=200, shuffle=False)
   total = 0
   correct = 0
   for pts, label in loader:
@@ -37,9 +37,11 @@ def eval(model, latent:int, budgeter):
 def main():
   modelnet10 = ModelNet10("data/ModelNet10", train=True)
   loader = torch.utils.data.DataLoader(modelnet10, batch_size=32, shuffle=True)
-  p = 0.6
+  p = 0.4
   sd = StructuredDropout(p, step=step, zero_pad=True)
-  model = PointNet(dropout=sd).to(device)
+  #model = PointNet(dropout=sd).to(device)
+  model = torch.load("models/pointnet.pt")
+
   opt = torch.optim.Adam(model.parameters(), lr=1e-3)
   alpha = 1e-3
   t = trange(epochs)
@@ -67,14 +69,17 @@ def main():
         L=f"{loss.item():.03f}", correct=f"{correct:03}/{label.shape[0]:03}",
         #lr=f"{sched.get_last_lr()[0]:.01e}"
       )
-
+  #torch.save(model, "models/pointnet.pt")
   model = model.eval()
-  with torch.no_grad():
-    print("No latent budget", eval(model, None, None))
-    budgets = range(1, max_budget+1, step)
-    accs = [eval(model, i, sd) for i in tqdm(budgets)]
-    print(accs)
 
+  budgets = range(1, max_budget+1)
+  params = [model.num_parameters(es) for es in budgets]
+  plot_number_parameters(budgets, params, "FC Layer Parameters", title="PointNet")
+
+  with torch.no_grad():
+    #print("No latent budget", eval(model, None, None))
+    budgets = range(1, max_budget+1, step*4)
+    accs = [eval(model, i, sd) for i in tqdm(budgets)]
   plot_budgets(budgets, accs)
 
 if __name__ == "__main__": main()

@@ -9,10 +9,10 @@ from tqdm import trange, tqdm
 import matplotlib.pyplot as plt
 
 from src.ctrl import StructuredDropout, MLP
-from .utils import plot_budgets, plot_timing, plot_number_parameters
+from .utils import plot_budgets, plot_number_parameters
 import gc
 
-epochs = 50
+epochs = 100
 min_budget = 1
 max_budget = 256
 
@@ -22,7 +22,7 @@ def eval(model, latent:int, budgeter):
   if latent is not None: budgeter.set_latent_budget(latent)
   model = model.eval()
   mnist = tv.datasets.MNIST("data", train=False, download=True, transform=tv.transforms.ToTensor())
-  loader = torch.utils.data.DataLoader(mnist, batch_size=500, shuffle=False)
+  loader = torch.utils.data.DataLoader(mnist, batch_size=2000, shuffle=False)
   total = 0
   correct = 0
   for img, label in loader:
@@ -48,8 +48,8 @@ def main():
     bias=True,
     dropout=sd,
   ).to(device)
+  #model = torch.load("models/mnist.pt")
   opt = torch.optim.Adam(model.parameters(), lr=8e-4, weight_decay=0)
-  #sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, 50_000)
   t = trange(epochs)
   for i in t:
     for img, label in loader:
@@ -60,40 +60,30 @@ def main():
       loss = F.cross_entropy(pred, label)
       loss.backward()
       opt.step()
-      #sched.step()
 
       pred_labels = F.softmax(pred,dim=-1).argmax(dim=-1)
       correct = (pred_labels == label).sum()
       t.set_postfix(
         L=f"{loss.item():.03f}", correct=f"{correct:03}/{label.shape[0]:03}",
-        #lr=f"{sched.get_last_lr()[0]:.01e}"
       )
+  torch.save(model, "models/mnist.pt")
   budgets = range(1, max_budget+1)
   with torch.no_grad():
     accs = []
-    times = []
     param_counts = []
     # remove gc so that measuring inference time is more accurate
-    gc.disable()
-
     for b in tqdm(budgets):
-      torch.cuda.empty_cache()
-      gc.collect()
-      start = time.time()
       accs.append(eval(model, b, sd))
-      times.append(time.time() - start)
       param_counts.append(model.number_inference_parameters())
-
-    gc.enable()
     print(accs)
-  plot_budgets(budgets, accs, p)
-  plot_timing(budgets, times)
+  plot_budgets(budgets, accs, p=p)
   plot_number_parameters(budgets, param_counts)
 
   for i, layer in enumerate([model.init, *model.layers, model.out]):
     plt.imshow(layer.weight.cpu().detach().numpy(), cmap='magma', interpolation='nearest')
     plt.colorbar()
     plt.savefig(f"mnist_linear_{i}.png")
+
     plt.clf()
     plt.close()
 

@@ -11,9 +11,10 @@ from src.ctrl import TriangleMLP
 leaky_relu = nn.LeakyReLU(inplace=True)
 
 class Tnet(nn.Module):
- def __init__(self, k=3, linear=nn.Linear, dropout=nn.Identity()):
+  def __init__(self, k=3, linear=nn.Linear, dropout=nn.Identity()):
     super().__init__()
     self.k=k
+    self.dropout = dropout
     self.convs = nn.Sequential(
       nn.Conv1d(k, 64, 1),
       nn.BatchNorm1d(64),
@@ -37,18 +38,20 @@ class Tnet(nn.Module):
       linear(512,256),
       nn.BatchNorm1d(256),
       leaky_relu,
+      dropout,
     )
 
     self.out = nn.Linear(256,k*k)
 
 
- def forward(self, input):
-  x = self.convs(input).max(dim=-1)[0]
-  x = self.fc(x)
-  init = torch.eye(self.k, requires_grad=True, device=x.device)
-  x = F.pad(x, (0, 256-x.shape[-1]))
-  return self.out(x).reshape(-1,self.k,self.k) + init
-
+  def num_parameters(self, es:int):
+    return 1024 * min(es, 512)#+ 512 * min(es, 256)
+  def forward(self, input):
+   x = self.convs(input).max(dim=-1)[0]
+   x = self.fc(x)
+   init = torch.eye(self.k, requires_grad=True, device=x.device)
+   x = F.pad(x, (0, 256-x.shape[-1]))
+   return self.out(x).reshape(-1,self.k,self.k) + init
 
 class Transform(nn.Module):
   def __init__(self, dropout=nn.Identity(),linear=nn.Linear):
@@ -70,7 +73,8 @@ class Transform(nn.Module):
       nn.BatchNorm1d(1024),
     )
 
-
+  def num_parameters(self, es:int):
+    return self.input_tf.num_parameters(es) + self.feature_transform.num_parameters(es)
   def forward(self, x):
     matrix3x3 = self.input_tf(x)
 
@@ -109,6 +113,9 @@ class PointNet(nn.Module):
 
     self.to_classes = nn.Linear(256, classes)
 
+  def num_parameters(self, es:int):
+    tf_num_params = self.transform.num_parameters(es)
+    return tf_num_params + 1024 * min(512, es) + 512 * min(256, es)
   def forward(self, input):
     x, matrix3x3, matrix64x64 = self.transform(input)
     x = self.compress(x)

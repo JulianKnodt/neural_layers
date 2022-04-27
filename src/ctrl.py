@@ -4,14 +4,6 @@ import torch
 import math
 import random
 
-mlp_init_kinds = {
-    None,
-    "zero",
-    "kaiming",
-    "xavier",
-    "siren",
-}
-
 # An upper triangular linear layer.
 # This retains sparsity in further layers,
 # because we know the output structure given a sparse input.
@@ -77,6 +69,7 @@ class StructuredDropout(nn.Module):
     zero_pad:bool = False,
 
     step:int=1,
+    dim=-1,
   ):
     assert(p >= 0)
     assert(p <= 1)
@@ -90,6 +83,7 @@ class StructuredDropout(nn.Module):
     self.eval_size = eval_size
 
     self.zero_pad = zero_pad
+    self.dim = dim
 
   def forward(self, x):
     p = self.p
@@ -129,6 +123,13 @@ class StructuredDropout(nn.Module):
     cut = F.linear(x, weight[:cutoff], bias) * output_features/cutoff
     return (cut if not self.zero_pad else F.pad(cut, (0, output_features-cutoff))), cutoff
 
+mlp_init_kinds = {
+    None,
+    "zero",
+    "kaiming",
+    "xavier",
+    "siren",
+}
 
 class TriangleMLP(nn.Module):
   "MLP which uses triangular layers for efficiency"
@@ -221,7 +222,7 @@ class MLP(nn.Module):
 
     activation=nn.LeakyReLU(inplace=True),
     init="xavier",
-    dropout = StructuredDropout(p=0.5,lower_bound=3),
+    dropout = StructuredDropout(p=0.2,lower_bound=3, step=5),
   ):
     assert init in mlp_init_kinds, f"Must use init kind, got {init} not in {mlp_init_kinds}"
 
@@ -274,6 +275,7 @@ class MLP(nn.Module):
 
     for i, layer in enumerate(self.layers):
       x = self.act(x)
+      # TODO in theory could do some sort of batch normalization here?
       x, cutoff = self.dropout.pre_apply_linear(layer, x, layer.out_features, cutoff)
 
     out_size = self.out.out_features
