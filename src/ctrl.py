@@ -107,20 +107,38 @@ class StructuredDropout(nn.Module):
     if random.random() > self.p or self.lower_bound >= upper: return None
     return random.choice(range(self.lower_bound, upper, self.step))
   # Apply the linear layer that precedes x more cheaply.
-  def pre_apply_linear(self, lin, x, output_features:int, input_features=None):
+  def pre_apply_linear(
+    self,
+    lin,
+    x,
+    output_features:int,
+    input_features=None,
+    bn=nn.Identity()
+  ):
     cutoff = self.cutoff(output_features) if self.training else self.eval_size
-
 
     weight = lin.weight
     if input_features is not None:
       x = x[..., :input_features]
       weight = weight[:, :input_features]
 
-    if cutoff is None: return F.linear(x, weight, lin.bias), None
+    if cutoff is None: return bn(F.linear(x, weight, lin.bias)), None
 
 
     bias = None if lin.bias is None else lin.bias[:cutoff]
-    cut = F.linear(x, weight[:cutoff], bias) * output_features/cutoff
+    norm = output_features/cutoff
+    cut = F.linear(x, weight[:cutoff], bias) * norm
+    if isinstance(bn, nn.BatchNorm1d):
+      cut = F.batch_norm(
+        cut,
+        bn.running_mean[:cutoff] * norm,
+        bn.running_var[:cutoff],
+        bn.weight[:cutoff],
+        bn.bias[:cutoff],
+        momentum=bn.momentum,
+        eps=bn.eps,
+        training=self.training,
+      )
     return (cut if not self.zero_pad else F.pad(cut, (0, output_features-cutoff))), cutoff
 
 mlp_init_kinds = {
@@ -211,6 +229,11 @@ class TriangleMLP(nn.Module):
     return F.linear(x, self.out.weight[:, :x.shape[-1]], self.out.bias)\
       .reshape(p.shape[:-1] + (out_size,))
 
+def index_opt(l, idx, default=None):
+  try: return l[idx]
+  except IndexError: return default
+
+
 class MLP(nn.Module):
   def __init__(
     self,
@@ -219,6 +242,7 @@ class MLP(nn.Module):
     hidden_sizes=[256] * 3,
     # instead of outputting a single color, output multiple colors
     bias:bool=True,
+    batch_norm:bool=False,
 
     activation=nn.LeakyReLU(inplace=True),
     init="xavier",
@@ -232,6 +256,13 @@ class MLP(nn.Module):
       nn.Linear(hidden_size, hidden_sizes[i+1], bias=bias)
       for i, hidden_size in enumerate(hidden_sizes[:-1])
     ])
+
+    if batch_norm:
+      self.batch_norms = nn.ModuleList([
+        nn.BatchNorm1d(hs) for hs in hidden_sizes
+      ])
+    else:
+      self.batch_norms = []
 
     assert(isinstance(dropout, StructuredDropout))
     self.dropout = dropout
@@ -258,6 +289,7 @@ class MLP(nn.Module):
     elif init == "kaiming":
       for t in weights: nn.init.kaiming_normal_(t, mode="fan_out")
       for t in biases: nn.init.zeros_(t)
+    self.ident = nn.Identity()
 
   def set_latent_budget(self,ls:int): self.dropout.set_latent_budget(ls)
   def number_inference_parameters(self):
@@ -271,12 +303,16 @@ class MLP(nn.Module):
   def forward(self, p):
     flat = p.reshape(-1, p.shape[-1])
 
-    x, cutoff = self.dropout.pre_apply_linear(self.init, flat, self.init.out_features)
+    bn = index_opt(self.batch_norms, 0, self.ident)
+    x, cutoff = self.dropout.pre_apply_linear(
+      self.init, flat, self.init.out_features, bn=bn,
+    )
 
     for i, layer in enumerate(self.layers):
       x = self.act(x)
+      bn = index_opt(self.batch_norms, i+1, self.ident)
       # TODO in theory could do some sort of batch normalization here?
-      x, cutoff = self.dropout.pre_apply_linear(layer, x, layer.out_features, cutoff)
+      x, cutoff = self.dropout.pre_apply_linear(layer, x, layer.out_features, cutoff, bn=bn)
 
     out_size = self.out.out_features
 

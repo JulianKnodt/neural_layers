@@ -32,20 +32,18 @@ def eval(model, latent:int, budgeter):
     pred_labels = F.softmax(pred,dim=-1).argmax(dim=-1)
     correct += (pred_labels == label).sum().item()
     total += label.shape[0]
-  #print(f"latent({latent:03}): correct={correct}/{total}")
   return correct/total
 
 def main():
   mnist = tv.datasets.MNIST("data", download=True, transform=tv.transforms.ToTensor())
   loader = torch.utils.data.DataLoader(mnist, batch_size=500, shuffle=True)
   # in order to test without structured Dropout, set p to 0.
-  p = 0.75
+  p = 1
   sd = StructuredDropout(p)
   model = MLP(
     in_features=28 * 28,
     out_features=10,
     hidden_sizes=[max_budget] * 2,
-    bias=True,
     dropout=sd,
   ).to(device)
   #model = torch.load("models/mnist.pt")
@@ -72,12 +70,15 @@ def main():
     accs = []
     param_counts = []
     # remove gc so that measuring inference time is more accurate
-    for b in tqdm(budgets):
-      accs.append(eval(model, b, sd))
+    t = tqdm(budgets)
+    for b in t:
+      acc = eval(model, b, sd)
+      accs.append(acc)
       param_counts.append(model.number_inference_parameters())
+      t.set_postfix(L=f"{acc:.02f}")
     print(accs)
-  plot_budgets(budgets, accs, p=p)
-  plot_number_parameters(budgets, param_counts)
+  plot_budgets(budgets, accs, p=p, title="MNIST")
+  plot_number_parameters(budgets, param_counts, title="MNIST")
 
   for i, layer in enumerate([model.init, *model.layers, model.out]):
     plt.imshow(layer.weight.cpu().detach().numpy(), cmap='magma', interpolation='nearest')
