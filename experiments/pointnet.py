@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import torchvision as tv
 from tqdm import trange, tqdm
 
-from src.ctrl import TriangleMLP, StructuredDropout, TriangleLinear
+from src.ctrl import StructuredDropout
 from src.pointnet import ModelNet10, PointNet
 from .utils import plot_budgets, plot_number_parameters
 

@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
-from src.ctrl import TriangleMLP
 
 leaky_relu = nn.LeakyReLU(inplace=True)
 

@@ -80,12 +80,12 @@ def main():
   plot_budgets(budgets, accs, p=p, title="MNIST")
   plot_number_parameters(budgets, param_counts, title="MNIST")
 
-  for i, layer in enumerate([model.init, *model.layers, model.out]):
-    plt.imshow(layer.weight.cpu().detach().numpy(), cmap='magma', interpolation='nearest')
-    plt.colorbar()
-    plt.savefig(f"mnist_linear_{i}.png")
-
-    plt.clf()
-    plt.close()
+#  for i, layer in enumerate([model.init, *model.layers, model.out]):
+#    plt.imshow(layer.weight.cpu().detach().numpy(), cmap='magma', interpolation='nearest')
+#    plt.colorbar()
+#    plt.savefig(f"mnist_linear_{i}.png")
+#
+#    plt.clf()
+#    plt.close()
 
 if __name__ == "__main__": main()

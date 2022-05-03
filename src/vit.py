@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from einops import repeat
 from einops.layers.torch import Rearrange
 
-from src.ctrl import TriangleMLP, StructuredDropout, TriangleLinear
+from src.ctrl import StructuredDropout
 
 class PreNorm(nn.Module):
   def __init__(self, dim, fn):

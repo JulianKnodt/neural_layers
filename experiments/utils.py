@@ -25,10 +25,11 @@ def plot_budgets(budgets, accs, ylabel="Accuracy (%)", p=None, title="PointNet")
   )
 
   if p is not None:
+    hs = int((0.5 + (1-p)/2) * max(budgets))
     plt.axvline(
-      x=(0.5 + p/2) * max(budgets),
+      x=hs,
       color="k", linestyle="--",
-      label="Average training cutoff",
+      label=f"Average training cutoff: {hs}",
     )
 
   plt.legend()
