@@ -10,9 +10,9 @@ from src.ctrl import StructuredDropout
 from src.pointnet import ModelNet10, PointNet
 from .utils import plot_budgets, plot_number_parameters
 
-epochs = 100
+epochs = 15
 max_budget = 512
-step = 1
+step = 8
 
 device = "cuda"
 

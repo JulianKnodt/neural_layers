@@ -14,6 +14,7 @@ class StructuredDropout(nn.Module):
     lower_bound:int=1,
     eval_size=None,
     zero_pad:bool = False,
+    normalize:bool=True,
 
     step:int=1,
     dim=-1,
@@ -28,11 +29,12 @@ class StructuredDropout(nn.Module):
     self.step = step
     self.lower_bound = lower_bound
     self.eval_size = eval_size
+    self.normalize = normalize
 
     self.zero_pad = zero_pad
     self.dim = dim
 
-  def forward(self, x):
+  def inner(self, x):
     p = self.p
     upper = x.shape[-1]
 
@@ -46,8 +48,12 @@ class StructuredDropout(nn.Module):
     cutoff = self.cutoff(upper)
     if cutoff is None: return x
 
-    cut = (upper/cutoff) * x[..., :cutoff]
+    cut = x[..., :cutoff]
+    if self.normalize: cut = (upper/cutoff) * cut
+
     return cut if not self.zero_pad else F.pad(cut, (0, upper-cutoff))
+
+  def forward(self, x): return self.inner(x.movedim(self.dim, -1)).movedim(-1, self.dim)
 
   def set_latent_budget(self, ls:int): self.eval_size = ls
   def cutoff(self, upper):
@@ -60,22 +66,76 @@ class StructuredDropout(nn.Module):
     x,
     output_features:int,
     input_features=None,
+    bn = nn.Identity(),
   ):
-    cutoff = self.cutoff(output_features) if self.training else self.eval_size
+    c = self.cutoff(output_features) if self.training else self.eval_size
 
     weight = lin.weight
     if input_features is not None:
       x = x[..., :input_features]
       weight = weight[:, :input_features]
 
-    if cutoff is None: return F.linear(x, weight, lin.bias), None
+    if cutoff is None: return bn(F.linear(x, weight, lin.bias)), None
 
+    bias = None if lin.bias is None else lin.bias[:c]
+    cut = F.linear(x, weight[:c], bias)
+    if isinstance(bn, nn.BatchNorm1d):
+      cut = F.batch_norm(
+        cut,
+        bn.running_mean[:c],
+        bn.running_var[:c],
+        bn.weight[:c],
+        bn.bias[:c],
+        momentum=bn.momentum,
+        eps=bn.eps,
+        training=self.training,
+      )
 
-    bias = None if lin.bias is None else lin.bias[:cutoff]
-    norm = output_features/cutoff
-    cut = F.linear(x, weight[:cutoff], bias) * norm
-    if self.zero_pad: cut = F.pad(cut, (0, output_features-cutoff))
-    return cut, cutoff
+    cut = cut * (output_features/c)
+    if self.zero_pad: cut = F.pad(cut, (0, output_features-c))
+    return cut, c
+
+class DynBatchNorm1d(nn.Module):
+  def __init__(
+    num_features,
+    eps=1e-5,
+    momentum=0.1,
+    affine=True,
+  ):
+    self.bn = BatchNorm1d(num_features, eps=eps, momentum=momentum, affine=affine)
+  def forward(self, x, cutoff):
+    # TODO maybe this needs to take into account the number of input features?
+    # If input features are missing, the expectation also goes down.
+    # i.e. normalize by all_input_features/used_input_features
+    c = cutoff
+    bn = self.bn
+    return F.batch_norm(
+      x[:c],
+      bn.running_mean[:c],
+      bn.running_var[:c],
+      weight=bn.weight[:c],
+      bias=bn.bias[:c],
+      training=self.training,
+      momentum=bn.momentum,
+      eps=bn.eps,
+    )
+
+# concatenates two vectors, but instead of
+# stacking them on top of each other, interleave them.
+def zip_concat(a, b, dim=-1):
+  a = a.movedim(dim,-1)
+  b = b.movedim(dim,-1)
+
+  a_s = a.shape[-1]
+  b_s = b.shape[-1]
+  if a_s < b_s: a = F.pad(a, (0, b_s - a_s))
+  elif a_s > b_s: b = F.pad(b, (0, a_s - b_s))
+
+  return torch.stack([a, b],dim=-1).flatten(-2).movedim(-1, dim)
+
+def index_opt(l, idx, default=None):
+  try: return l[idx]
+  except IndexError: return default
 
 mlp_init_kinds = {
     None,
@@ -93,21 +153,31 @@ class MLP(nn.Module):
     hidden_sizes=[256] * 3,
     # instead of outputting a single color, output multiple colors
     bias:bool=True,
+    batch_norm:bool=False,
     skip=1000,
 
     activation=nn.LeakyReLU(inplace=True),
     init="xavier",
-    dropout = StructuredDropout(p=0.2,lower_bound=3, step=5),
+    dropout = StructuredDropout(p=0.5,lower_bound=32),
   ):
     assert init in mlp_init_kinds, f"Must use init kind, got {init} not in {mlp_init_kinds}"
 
     super().__init__()
     self.skip = skip
 
+    skip_size = lambda i: hidden_sizes[0] if (i+1) % skip == 0 else 0
+
     self.layers = nn.ModuleList([
-      nn.Linear(hidden_size, hidden_sizes[i+1], bias=bias)
+      nn.Linear(hidden_size + skip_size(i), hidden_sizes[i+1], bias=bias)
       for i, hidden_size in enumerate(hidden_sizes[:-1])
     ])
+
+    if batch_norm:
+      self.bns = nn.ModuleList([
+        nn.BatchNorm1d(hs + skip_size(i)) for i, hs in enumerate(hidden_sizes)
+      ])
+    else:
+      self.bns = []
 
     assert(isinstance(dropout, StructuredDropout))
     self.dropout = dropout
@@ -134,6 +204,7 @@ class MLP(nn.Module):
     elif init == "kaiming":
       for t in weights: nn.init.kaiming_normal_(t, mode="fan_out")
       for t in biases: nn.init.zeros_(t)
+
     self.ident = nn.Identity()
 
   def set_latent_budget(self,ls:int): self.dropout.set_latent_budget(ls)
@@ -148,23 +219,25 @@ class MLP(nn.Module):
   def forward(self, p):
     flat = p.reshape(-1, p.shape[-1])
 
-    x, cutoff = self.dropout.pre_apply_linear(
+    init_x, init_cutoff = x, cutoff = self.dropout.pre_apply_linear(
       self.init, flat, self.init.out_features,
+      bn=index_opt(self.bns, 0, self.ident),
     )
-    init_x = x
-    init_cutoff = cutoff
 
     for i, layer in enumerate(self.layers):
-      # perform skip connections
-      if i != 0 and i % self.skip == 0:
-        if init_cutoff > cutoff:
-          x, skip = init_x, x
-          cutoff = init_cutoff
-        else: skip = init_x
-        x[..., :c] = x[..., :c] + init_x[..., :c]
-
+      # TODO add batch normalization here
       x = self.act(x)
-      x, cutoff = self.dropout.pre_apply_linear(layer, x, layer.out_features, cutoff)
+
+      # perform skip connections
+      if (i+1) % self.skip == 0:
+        x = zip_concat(init_x, x)
+        # The sparsity is now 2x the least sparse prior vector.
+        cutoff = None if init_cutoff is None or cutoff is None else (2 * max(init_cutoff, cutoff))
+
+      x, cutoff = self.dropout.pre_apply_linear(
+        layer, x, layer.out_features, cutoff,
+        bn=index_opt(self.bns,i+1,self.ident),
+      )
 
     out_size = self.out.out_features
 
