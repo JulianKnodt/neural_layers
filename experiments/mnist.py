@@ -51,7 +51,7 @@ def main():
   t = trange(epochs)
   for i in t:
     for img, label in loader:
-      opt.zero_grad()
+      opt.zero_grad(set_to_none=True)
       img = img.flatten(1).to(device)
       label = label.to(device)
       pred = model(img)
@@ -61,9 +61,7 @@ def main():
 
       pred_labels = F.softmax(pred,dim=-1).argmax(dim=-1)
       correct = (pred_labels == label).sum()
-      t.set_postfix(
-        L=f"{loss.item():.03f}", correct=f"{correct:03}/{label.shape[0]:03}",
-      )
+      t.set_postfix(L=f"{loss.item():.03f}", correct=f"{correct:03}/{label.shape[0]:03}")
   torch.save(model, "models/mnist.pt")
   budgets = range(1, max_budget+1)
   with torch.no_grad():

@@ -10,9 +10,10 @@ from src.ctrl import StructuredDropout
 from src.pointnet import ModelNet10, PointNet
 from .utils import plot_budgets, plot_number_parameters
 
-epochs = 15
+epochs = 100
 max_budget = 512
-step = 8
+step = 1
+p = 0.5
 
 device = "cuda"
 
@@ -36,17 +37,17 @@ def eval(model, latent:int, budgeter):
 def main():
   modelnet10 = ModelNet10("data/ModelNet10", train=True)
   loader = torch.utils.data.DataLoader(modelnet10, batch_size=32, shuffle=True)
-  p = 1
-  sd = StructuredDropout(p, step=step, zero_pad=True)
-  model = PointNet(dropout=sd).to(device)
-  #model = torch.load("models/pointnet.pt")
+  model = PointNet(dropout=StructuredDropout(p, step=step)).to(device)
+  #model = torch.load(f"models/pointnet{p}.pt")
+  sd = model.dropout
 
   opt = torch.optim.Adam(model.parameters(), lr=1e-3)
   alpha = 1e-3
   t = trange(epochs)
   for i in t:
+    torch.save(model, f"models/pointnet{p}.pt")
     for pts, label in loader:
-      opt.zero_grad()
+      opt.zero_grad(set_to_none=True)
 
       pts = pts.to(device).transpose(-1,-2)
       label = label.to(device).squeeze(-1)
@@ -67,7 +68,6 @@ def main():
       t.set_postfix(
         L=f"{loss.item():.03f}", correct=f"{correct:03}/{label.shape[0]:03}",
       )
-  #torch.save(model, "models/pointnet.pt")
   model = model.eval()
 
   budgets = range(1, max_budget+1)

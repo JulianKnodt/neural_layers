@@ -29,29 +29,18 @@ class Tnet(nn.Module):
       leaky_relu,
     )
 
-    self.fc = nn.Sequential(
-      nn.Linear(1024,512),
-      nn.BatchNorm1d(512),
-      leaky_relu,
-      dropout,
-
-      linear(512,256),
-      nn.BatchNorm1d(256),
-      leaky_relu,
-      dropout,
+    self.fc = MLP(
+      in_features=1024,
+      out_features=k*k,
+      hidden_sizes=[512,256],
+      batch_norm=True,
+      dropout=dropout
     )
-
-    self.out = nn.Linear(256,k*k)
-
-
-  def num_parameters(self, es:int):
-    return 1024 * min(es, 512)#+ 512 * min(es, 256)
+  def num_parameters(self, es:int): return self.fc.number_inference_parameters(es)
   def forward(self, input):
    x = self.convs(input).max(dim=-1)[0]
-   x = self.fc(x)
    init = torch.eye(self.k, requires_grad=True, device=x.device)
-   x = F.pad(x, (0, 256-x.shape[-1]))
-   return self.out(x).reshape(-1,self.k,self.k) + init
+   return self.fc(x).reshape(-1,self.k,self.k) + init
 
 class Transform(nn.Module):
   def __init__(self, dropout=nn.Identity(),linear=nn.Linear):
@@ -92,35 +81,19 @@ class PointNet(nn.Module):
     super().__init__()
     self.transform = Transform(linear=linear, dropout=dropout)
 
-    #self.compress = TriangleMLP(
-    #  in_features=1024,
-    #  out_features=10,
-    #  hidden_sizes=[512,256],
-    #  skip=1000,
-    #  init_dropout=dropout,
-    #)
-    self.compress = nn.Sequential(
-      nn.Linear(1024, 512),
-      nn.BatchNorm1d(512),
-      leaky_relu,
-      dropout,
-
-      linear(512, 256),
-      nn.BatchNorm1d(256),
-      leaky_relu,
-      dropout,
+    self.compress = MLP(
+      in_features=1024,
+      out_features=10,
+      hidden_sizes=[512,256],
+      batch_norm=True,
+      dropout=dropout
     )
 
-    self.to_classes = nn.Linear(256, classes)
-
   def num_parameters(self, es:int):
-    tf_num_params = self.transform.num_parameters(es)
-    return tf_num_params + 1024 * min(512, es) + 512 * min(256, es)
+    return self.transform.num_parameters(es) + self.compress.number_inference_parameters(es)
   def forward(self, input):
     x, matrix3x3, matrix64x64 = self.transform(input)
-    x = self.compress(x)
-    x = F.pad(x, (0, 256-x.shape[-1]))
-    return self.to_classes(x), matrix3x3, matrix64x64
+    return self.compress(x), matrix3x3, matrix64x64
 
 # reads just the points from an off file
 def read_off(f):

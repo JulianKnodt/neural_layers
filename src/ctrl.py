@@ -40,7 +40,7 @@ class StructuredDropout(nn.Module):
 
     if not self.training:
       esz = self.eval_size
-      if esz is None or esz >= upper: return x
+      if esz is None or esz > upper: return x
 
       cut = (upper/esz) * x[..., :esz]
       return cut if not self.zero_pad else F.pad(cut, (0,upper-esz))
@@ -68,30 +68,36 @@ class StructuredDropout(nn.Module):
     input_features=None,
     bn = nn.Identity(),
   ):
-    c = self.cutoff(output_features) if self.training else self.eval_size
+    c = self.cutoff(output_features) if self.training else \
+      (None if self.eval_size is None or self.eval_size >= output_features else self.eval_size)
 
     weight = lin.weight
     if input_features is not None:
       x = x[..., :input_features]
       weight = weight[:, :input_features]
 
-    if cutoff is None: return bn(F.linear(x, weight, lin.bias)), None
+    if c is None: return bn(F.linear(x, weight, lin.bias)), None
 
     bias = None if lin.bias is None else lin.bias[:c]
     cut = F.linear(x, weight[:c], bias)
+
     if isinstance(bn, nn.BatchNorm1d):
+      bn_training = self.training or ((bn.running_mean is None) and (bn.running_var is None))
       cut = F.batch_norm(
         cut,
-        bn.running_mean[:c],
-        bn.running_var[:c],
+        bn.running_mean[:c] if not self.training or bn.track_running_stats else None,
+        bn.running_var[:c] if not self.training or bn.track_running_stats else None,
         bn.weight[:c],
         bn.bias[:c],
         momentum=bn.momentum,
         eps=bn.eps,
-        training=self.training,
+        training=bn_training,
       )
 
+    # This step is equivalent to applying the structured dropout
+    # and it is important that it is applied after the batch norm
     cut = cut * (output_features/c)
+
     if self.zero_pad: cut = F.pad(cut, (0, output_features-c))
     return cut, c
 
@@ -151,7 +157,6 @@ class MLP(nn.Module):
     in_features:int=571,
     out_features:int=3,
     hidden_sizes=[256] * 3,
-    # instead of outputting a single color, output multiple colors
     bias:bool=True,
     batch_norm:bool=False,
     skip=1000,
@@ -177,7 +182,7 @@ class MLP(nn.Module):
         nn.BatchNorm1d(hs + skip_size(i)) for i, hs in enumerate(hidden_sizes)
       ])
     else:
-      self.bns = []
+      self.bns = nn.ModuleList([])
 
     assert(isinstance(dropout, StructuredDropout))
     self.dropout = dropout
@@ -208,8 +213,8 @@ class MLP(nn.Module):
     self.ident = nn.Identity()
 
   def set_latent_budget(self,ls:int): self.dropout.set_latent_budget(ls)
-  def number_inference_parameters(self):
-    es = self.dropout.eval_size
+  def number_inference_parameters(self, es:int=None):
+    es = es or self.dropout.eval_size
     assert(es is not None)
     out = 0
     out += self.init.weight[:es, :].numel() + self.init.bias[:es].numel()
@@ -225,7 +230,6 @@ class MLP(nn.Module):
     )
 
     for i, layer in enumerate(self.layers):
-      # TODO add batch normalization here
       x = self.act(x)
 
       # perform skip connections
@@ -239,7 +243,6 @@ class MLP(nn.Module):
         bn=index_opt(self.bns,i+1,self.ident),
       )
 
-    out_size = self.out.out_features
-
+    x = self.act(x)
     return F.linear(x, self.out.weight[:, :x.shape[-1]], self.out.bias)\
-      .reshape(*p.shape[:-1], out_size)
+      .reshape(*p.shape[:-1], self.out.out_features)
