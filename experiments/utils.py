@@ -1,27 +1,27 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-def plot_budgets(budgets, accs, ylabel="Accuracy (%)", p=None, title="PointNet"):
+def plot_budgets(budgets, accs, ylabel="Accuracy (%)", p=None, title="PointNet",mul=100):
   budgets = list(budgets)
-  plt.plot(budgets, accs)
+  plt.scatter(budgets, accs)
   plt.xlabel("Hidden Size")
   plt.ylabel(ylabel)
   plt.title(f"{title}: Hidden Size vs. {ylabel}")
 
   idx = np.argmax(accs)
   best = accs[idx]
-  plt.plot(budgets[idx], best, "ro", label=f"Highest Accuracy: {100*best:.02f}%, Hidden Size: {budgets[idx]}")
+  plt.plot(budgets[idx], best, "ro", label=f"Highest: {mul*best:.02f}%, Hidden Size: {budgets[idx]}")
 
   qtr = np.percentile(accs,25,interpolation="nearest")
   plt.plot(
     budgets[accs.index(qtr)], qtr, "yo",
-    label=f"Lower Quartile Accuracy: {100*qtr:.02f}%, Hidden Size: {budgets[accs.index(qtr)]}",
+    label=f"Lower Quartile: {mul*qtr:.02f}%, Hidden Size: {budgets[accs.index(qtr)]}",
   )
 
   median = np.percentile(accs,50,interpolation="nearest")
   plt.plot(
     budgets[accs.index(median)], median, "go",
-    label=f"Median Accuracy: {100*median:.02f}%, Hidden Size: {budgets[accs.index(median)]}",
+    label=f"Median: {mul*median:.02f}%, Hidden Size: {budgets[accs.index(median)]}",
   )
 
   if p is not None:
