@@ -79,6 +79,7 @@ class Transform(nn.Module):
 class PointNet(nn.Module):
   def __init__(self, classes = 10, dropout=nn.Dropout(0.3), linear=nn.Linear):
     super().__init__()
+    self.dropout = dropout
     self.transform = Transform(linear=linear, dropout=dropout)
 
     self.compress = MLP(

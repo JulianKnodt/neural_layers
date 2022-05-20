@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 
 from src.ctrl import StructuredDropout, MLP
 from .utils import plot_budgets, plot_number_parameters
-import gc
 
 epochs = 100
 min_budget = 1
@@ -39,7 +38,7 @@ def main():
   loader = torch.utils.data.DataLoader(mnist, batch_size=500, shuffle=True)
   # in order to test without structured Dropout, set p to 0.
   p = 1
-  sd = StructuredDropout(p)
+  sd = StructuredDropout(p, freq=1e-2)
   model = MLP(
     in_features=28 * 28,
     out_features=10,
@@ -67,7 +66,6 @@ def main():
   with torch.no_grad():
     accs = []
     param_counts = []
-    # remove gc so that measuring inference time is more accurate
     t = tqdm(budgets)
     for b in t:
       acc = eval(model, b, sd)

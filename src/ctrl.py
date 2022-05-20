@@ -10,6 +10,7 @@ class StructuredDropout(nn.Module):
     self,
     # chance of turning off bits.
     p=0.5,
+    freq=2e-4,
     # the minimum number of features to always retain
     lower_bound:int=1,
     eval_size=None,
@@ -25,7 +26,9 @@ class StructuredDropout(nn.Module):
     assert(lower_bound > 0), "Cannot use 0 or below as lower bound"
 
     super().__init__()
-    self.p = p
+    self.p = math.acos(1-2 * p)
+    # premultiply by pi to change the frequency
+    self.freq = freq * math.pi
     self.step = step
     self.lower_bound = lower_bound
     self.eval_size = eval_size
@@ -33,9 +36,9 @@ class StructuredDropout(nn.Module):
 
     self.zero_pad = zero_pad
     self.dim = dim
+    self.i = 0
 
   def inner(self, x):
-    p = self.p
     upper = x.shape[-1]
 
     if not self.training:
@@ -56,7 +59,15 @@ class StructuredDropout(nn.Module):
   def forward(self, x): return self.inner(x.movedim(self.dim, -1)).movedim(-1, self.dim)
 
   def set_latent_budget(self, ls:int): self.eval_size = ls
+  def inc(self): self.i += 1
+  # pre-apply structural dropout layer, outputting how many features should be trimmed and a
+  # normalization factor.
+  def pre_apply(self, feats):
+    c = self.cutoff(output_features) if self.training else \
+      (None if self.eval_size is None or self.eval_size >= output_features else self.eval_size)
+    return c, 1 if c is None else (feats/c)
   def cutoff(self, upper):
+    p = (math.cos(self.i * self.freq + self.p) + 1)/2
     if random.random() > self.p or self.lower_bound >= upper: return None
     return random.choice(range(self.lower_bound, upper, self.step))
   # Apply the linear layer that precedes x more cheaply.
@@ -100,31 +111,6 @@ class StructuredDropout(nn.Module):
 
     if self.zero_pad: cut = F.pad(cut, (0, output_features-c))
     return cut, c
-
-class DynBatchNorm1d(nn.Module):
-  def __init__(
-    num_features,
-    eps=1e-5,
-    momentum=0.1,
-    affine=True,
-  ):
-    self.bn = BatchNorm1d(num_features, eps=eps, momentum=momentum, affine=affine)
-  def forward(self, x, cutoff):
-    # TODO maybe this needs to take into account the number of input features?
-    # If input features are missing, the expectation also goes down.
-    # i.e. normalize by all_input_features/used_input_features
-    c = cutoff
-    bn = self.bn
-    return F.batch_norm(
-      x[:c],
-      bn.running_mean[:c],
-      bn.running_var[:c],
-      weight=bn.weight[:c],
-      bias=bn.bias[:c],
-      training=self.training,
-      momentum=bn.momentum,
-      eps=bn.eps,
-    )
 
 # concatenates two vectors, but instead of
 # stacking them on top of each other, interleave them.

@@ -3,7 +3,7 @@ import numpy as np
 
 def plot_budgets(budgets, accs, ylabel="Accuracy (%)", p=None, title="PointNet",mul=100):
   budgets = list(budgets)
-  plt.scatter(budgets, accs)
+  plt.plot(budgets, accs)
   plt.xlabel("Hidden Size")
   plt.ylabel(ylabel)
   plt.title(f"{title}: Hidden Size vs. {ylabel}")
@@ -31,8 +31,22 @@ def plot_budgets(budgets, accs, ylabel="Accuracy (%)", p=None, title="PointNet",
       color="k", linestyle="--",
       label=f"Average training cutoff: {hs}",
     )
+  pareto_x = []
+  pareto_y = []
+  prev_best = 0
+  for i, a in enumerate(accs):
+    if a < prev_best: continue
+    # make line boxy by including item for previous element
+    if prev_best != 0:
+      pareto_x.append(budgets[i])
+      pareto_y.append(prev_best)
+    prev_best = a
+    pareto_x.append(budgets[i])
+    pareto_y.append(a)
 
-  plt.legend()
+  plt.plot(pareto_x, pareto_y, label="Pareto Frontier", linestyle="--", color="red")
+
+  plt.legend(fontsize="small")
 
   plt.savefig("budget.png", pad_inches=0.15)
   plt.clf()
